@@ -27,9 +27,9 @@ type Watcher struct {
 	//	Defaults to a `time.Duration` of 250 milliseconds
 	DebounceNano int64
 
-	//	A collection of custom `fsnotify.FileEvent` handlers.
+	//	A collection of custom `fsnotify.Event` handlers.
 	//	Not related to the handlers specified in your `Watcher.WatchIn` calls.
-	OnEvent []func(evt *fsnotify.FileEvent)
+	OnEvent []func(evt fsnotify.Event)
 
 	//	A collection of custom `error` handlers.
 	OnError []func(err error)
@@ -61,7 +61,7 @@ func (me *Watcher) Close() (err error) {
 func (me *Watcher) Go() {
 	defer log.Println("BYEBYE!!")
 	var (
-		evt                            *fsnotify.FileEvent
+		evt                            fsnotify.Event
 		err                            error
 		hasLast                        bool
 		dif                            int64
@@ -69,32 +69,32 @@ func (me *Watcher) Go() {
 		on                             WatcherHandler
 		ons                            []WatcherHandler
 		onErr                          func(err error)
-		onEvt                          func(evt *fsnotify.FileEvent)
+		onEvt                          func(evt fsnotify.Event)
 	)
 	lastEvt := map[string]int64{}
 	for {
 		select {
 		case <-me.closed:
 			return
-		case evt = <-me.Event:
-			if evt != nil {
-				_, hasLast = lastEvt[evt.Name]
-				if dif = time.Now().UnixNano() - lastEvt[evt.Name]; dif > me.DebounceNano || !hasLast {
-					for _, onEvt = range me.OnEvent {
-						onEvt(evt)
-					}
-					dirPath = filepath.Dir(evt.Name)
-					for dirPathAndNamePattern, ons = range me.allHandlers {
-						if filepath.Dir(dirPathAndNamePattern) == dirPath && ustr.MatchesAny(filepath.Base(evt.Name), filepath.Base(dirPathAndNamePattern)) {
-							for _, on = range ons {
-								on(evt.Name)
-							}
+		case evt = <-me.Events:
+
+			_, hasLast = lastEvt[evt.Name]
+			if dif = time.Now().UnixNano() - lastEvt[evt.Name]; dif > me.DebounceNano || !hasLast {
+				for _, onEvt = range me.OnEvent {
+					onEvt(evt)
+				}
+				dirPath = filepath.Dir(evt.Name)
+				for dirPathAndNamePattern, ons = range me.allHandlers {
+					if filepath.Dir(dirPathAndNamePattern) == dirPath && ustr.MatchesAny(filepath.Base(evt.Name), filepath.Base(dirPathAndNamePattern)) {
+						for _, on = range ons {
+							on(evt.Name)
 						}
 					}
-					lastEvt[evt.Name] = time.Now().UnixNano()
 				}
+				lastEvt[evt.Name] = time.Now().UnixNano()
 			}
-		case err = <-me.Error:
+
+		case err = <-me.Errors:
 			if err != nil {
 				for _, onErr = range me.OnError {
 					onErr(err)
@@ -116,7 +116,7 @@ func (me *Watcher) Go() {
 func (me *Watcher) WatchIn(dirPath string, namePattern ustr.Pattern, runHandlerNow bool, handler WatcherHandler) (errs []error) {
 	dirPath = filepath.Clean(dirPath)
 	if _, ok := me.dirsWatching[dirPath]; !ok {
-		if err := me.Watch(dirPath); err != nil {
+		if err := me.Add(dirPath); err != nil {
 			errs = append(errs, err)
 		} else {
 			me.dirsWatching[dirPath] = true
